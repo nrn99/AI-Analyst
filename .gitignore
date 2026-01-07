@@ -1,3 +1,19 @@
+# Environment and credentials
+.env
+nesta_service_account.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
 # Python-generated files
 __pycache__/
 *.py[oc]
