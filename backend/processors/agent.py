@@ -142,7 +142,9 @@ class FinanceAnalystAgent:
             self._logger.exception(msg)
             raise RuntimeError(msg) from exc
 
-    def query(self, input_text: str):
+    def query(self, input_text: str | None = None, input: str | None = None, **_kwargs):
+        if input_text is None:
+            input_text = input
         if not self.executor:
             try:
                 self.set_up()
