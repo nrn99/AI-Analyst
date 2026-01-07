@@ -1,22 +1,34 @@
-import os
 from datetime import datetime
 
-import pytest
-
-from agent_logic import get_localized_month_name, append_to_spreadsheet
+from backend.storers.sheets import DEFAULT_HEADERS, SheetsLedgerStore, get_localized_month_name
 
 
 class FakeValues:
-    def __init__(self):
+    def __init__(self, initial_values=None):
         self.updated = False
         self.appended = False
+        self._values = list(initial_values or [])
+
+    def get(self, spreadsheetId=None, range=None):
+        class _Get:
+            def __init__(self, values):
+                self._values = values
+
+            def execute(self):
+                return {"values": self._values}
+
+        return _Get(self._values)
 
     def update(self, spreadsheetId=None, range=None, valueInputOption=None, body=None):
         self.updated = True
+        if body and "values" in body:
+            self._values = body["values"] + self._values
         return self
 
     def append(self, spreadsheetId=None, range=None, valueInputOption=None, body=None):
         self.appended = True
+        if body and "values" in body:
+            self._values.extend(body["values"])
         return self
 
     def execute(self):
@@ -24,9 +36,10 @@ class FakeValues:
 
 
 class FakeSpreadsheets:
-    def __init__(self, locale="en_US", sheets=None):
+    def __init__(self, locale="en_US", sheets=None, values=None):
         self._locale = locale
         self._sheets = sheets or [{"properties": {"title": "Existing"}}]
+        self._values = FakeValues(values)
         self.batch_requested = False
 
     def get(self, spreadsheetId=None):
@@ -42,18 +55,20 @@ class FakeSpreadsheets:
 
     def batchUpdate(self, spreadsheetId=None, body=None):
         self.batch_requested = True
+
         class _Req:
             def execute(self_inner):
                 return {"replies": []}
+
         return _Req()
 
     def values(self):
-        return FakeValues()
+        return self._values
 
 
 class FakeService:
-    def __init__(self, locale="en_US", sheets=None):
-        self._spreadsheets = FakeSpreadsheets(locale=locale, sheets=sheets)
+    def __init__(self, locale="en_US", sheets=None, values=None):
+        self._spreadsheets = FakeSpreadsheets(locale=locale, sheets=sheets, values=values)
 
     def spreadsheets(self):
         return self._spreadsheets
@@ -62,23 +77,71 @@ class FakeService:
 def test_get_localized_month_name_sv():
     fake = FakeService(locale="sv_SE")
     name = get_localized_month_name(fake, spreadsheet_id="dummy")
-    # Expect Swedish month for current month
-    swedish = ["Januari", "Februari", "Mars", "April", "Maj", "Juni", "Juli", "Augusti", "September", "Oktober", "November", "December"]
+    swedish = [
+        "Januari",
+        "Februari",
+        "Mars",
+        "April",
+        "Maj",
+        "Juni",
+        "Juli",
+        "Augusti",
+        "September",
+        "Oktober",
+        "November",
+        "December",
+    ]
     assert name == swedish[datetime.now().month - 1]
 
 
 def test_get_localized_month_name_it():
     fake = FakeService(locale="it_IT")
     name = get_localized_month_name(fake, spreadsheet_id="dummy")
-    italian = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"]
+    italian = [
+        "Gennaio",
+        "Febbraio",
+        "Marzo",
+        "Aprile",
+        "Maggio",
+        "Giugno",
+        "Luglio",
+        "Agosto",
+        "Settembre",
+        "Ottobre",
+        "Novembre",
+        "Dicembre",
+    ]
     assert name == italian[datetime.now().month - 1]
 
 
 def test_append_to_spreadsheet_creates_tab_and_appends():
-    # create fake service with no matching month tab so code will create the tab
-    # use a unique month name by forcing locale to english but removing existing month
     fake = FakeService(locale="en_US", sheets=[{"properties": {"title": "Other"}}])
+    store = SheetsLedgerStore(service=fake, spreadsheet_id="sheet123")
+    res = store.append_transaction(10.0, "Test", "Misc", date="2026-01-06")
 
-    # call function with injected service and spreadsheet id to avoid env reliance
-    res = append_to_spreadsheet(10.0, "Test", "Misc", service=fake, spreadsheet_id="sheet123")
-    assert "Success: Logged to" in res
+    assert res["status"] == "appended"
+    assert fake._spreadsheets.batch_requested is True
+    assert fake._spreadsheets.values().updated is True
+    assert fake._spreadsheets.values().appended is True
+
+
+def test_append_to_spreadsheet_skips_duplicate():
+    month_name = get_localized_month_name(
+        FakeService(locale="en_US"),
+        spreadsheet_id="sheet123",
+        when="2026-01-06",
+    )
+    values = [
+        DEFAULT_HEADERS,
+        ["2026-01-06", "Test", "Misc", "10.0"],
+    ]
+    fake = FakeService(
+        locale="en_US",
+        sheets=[{"properties": {"title": month_name}}],
+        values=values,
+    )
+    store = SheetsLedgerStore(service=fake, spreadsheet_id="sheet123")
+    res = store.append_transaction(10.0, "Test", "Misc", date="2026-01-06")
+
+    assert res["status"] == "duplicate"
+    assert fake._spreadsheets.values().appended is False

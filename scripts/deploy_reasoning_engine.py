@@ -1,14 +1,22 @@
 import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import vertexai
 from dotenv import load_dotenv
 from vertexai.preview import reasoning_engines
-from agent_logic import FinanceAnalystAgent
+from backend.processors.agent import FinanceAnalystAgent
+from env_utils import resolve_gcp_project_id
 
 def main():
     # 1. Load environment and CLEAN variables immediately
     load_dotenv(override=True)
     
-    PROJECT_ID = os.getenv("GCP_PROJECT_ID", "").strip("'\"")
+    PROJECT_ID = resolve_gcp_project_id(set_env=True)
     LOCATION = os.getenv("GCP_LOCATION", "europe-west1").strip("'\"")
     STAGING_BUCKET = os.getenv("STAGING_BUCKET", "").strip("'\"")
 
@@ -17,6 +25,10 @@ def main():
     print(f"Project: [{PROJECT_ID}]", flush=True)
     print(f"Bucket:  [{STAGING_BUCKET}]", flush=True)
     
+    if not PROJECT_ID:
+        print("❌ ERROR: GCP_PROJECT_ID (or GOOGLE_CLOUD_PROJECT) could not be resolved", flush=True)
+        return
+
     if not STAGING_BUCKET.startswith("gs://"):
         print("❌ ERROR: STAGING_BUCKET is empty or missing 'gs://'", flush=True)
         return
@@ -53,7 +65,7 @@ def main():
             "google-auth-oauthlib",
             "python-dotenv"
         ],
-        extra_packages=["agent_logic.py"]
+        extra_packages=["env_utils.py", "backend"]
     )
 
     print(f"\n✅ SUCCESS! Agent live at: {remote_agent.resource_name}", flush=True)
