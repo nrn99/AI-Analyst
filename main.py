@@ -1,0 +1,62 @@
+import os
+import vertexai
+from dotenv import load_dotenv
+from vertexai.preview import reasoning_engines
+from agent_logic import FinanceAnalystAgent
+
+def main():
+    # 1. Load environment and CLEAN variables immediately
+    load_dotenv(override=True)
+    
+    PROJECT_ID = os.getenv("GCP_PROJECT_ID", "").strip("'\"")
+    LOCATION = os.getenv("GCP_LOCATION", "europe-west1").strip("'\"")
+    STAGING_BUCKET = os.getenv("STAGING_BUCKET", "").strip("'\"")
+
+    # Force print these out so we know EXACTLY what Python sees
+    print(f"--- Environment Diagnostic ---", flush=True)
+    print(f"Project: [{PROJECT_ID}]", flush=True)
+    print(f"Bucket:  [{STAGING_BUCKET}]", flush=True)
+    
+    if not STAGING_BUCKET.startswith("gs://"):
+        print("❌ ERROR: STAGING_BUCKET is empty or missing 'gs://'", flush=True)
+        return
+
+    # 2. INITIALIZE FIRST (This must happen before any other vertexai calls)
+    vertexai.init(
+        project=PROJECT_ID, 
+        location=LOCATION, 
+        staging_bucket=STAGING_BUCKET
+    )
+
+    # 3. Local Test (Optional)
+    print("\n--- Running Local Test ---", flush=True)
+    # tester = FinanceAnalystAgent()
+    # tester.set_up()
+    # print(f"Response: {tester.query('Jag köpte kaffe för 30kr.')}")
+
+    # 4. Deployment (Removed the 'staging_bucket' argument to fix TypeError)
+    print("\n--- Deploying to Vertex AI Agent Engine ---", flush=True)
+    
+    # We create a FRESH instance here
+    agent_instance = FinanceAnalystAgent()
+
+    remote_agent = reasoning_engines.ReasoningEngine.create(
+        agent_instance,
+        display_name="Finance_Agent_v3",
+        requirements=[
+            "google-cloud-aiplatform[agent_engines]",
+            "langchain-google-genai",
+            "langchain-classic",
+            "langchain-core",
+            "google-api-python-client",
+            "google-auth-httplib2",
+            "google-auth-oauthlib",
+            "python-dotenv"
+        ],
+        extra_packages=["agent_logic.py"]
+    )
+
+    print(f"\n✅ SUCCESS! Agent live at: {remote_agent.resource_name}", flush=True)
+
+if __name__ == "__main__":
+    main()

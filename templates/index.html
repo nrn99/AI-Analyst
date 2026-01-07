@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vertex AI Agent Demo</title>
+  </head>
+  <body>
+    <h1>Vertex AI Agent Demo</h1>
+    <button id="healthBtn">Check Health</button>
+    <button id="helloBtn">Say Hello</button>
+    <div id="output" style="white-space: pre-wrap; margin-top: 1em;"></div>
+
+    <script>
+      document.getElementById('healthBtn').onclick = async () => {
+        try {
+          const res = await fetch('/health');
+          const data = await res.json();
+          document.getElementById('output').textContent = JSON.stringify(data, null, 2);
+        } catch (e) {
+          document.getElementById('output').textContent = String(e);
+        }
+      };
+
+      document.getElementById('helloBtn').onclick = async () => {
+        try {
+          const res = await fetch('/chat', { method: 'POST' });
+          const data = await res.json();
+          document.getElementById('output').textContent = JSON.stringify(data, null, 2);
+        } catch (e) {
+          document.getElementById('output').textContent = String(e);
+        }
+      };
+    </script>
+  </body>
+</html>

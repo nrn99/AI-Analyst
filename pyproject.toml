@@ -1,0 +1,22 @@
+[project]
+name = "ai-analyst"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "google-api-core>=2.28.1",
+    "google-api-python-client>=2.187.0",
+    "google-auth-oauthlib>=1.2.3",
+    "google-cloud-aiplatform[agent-engines]>=1.130.0",
+    "google-cloud-storage>=3.7.0",
+    "langchain>=1.2.0",
+    "langchain-classic>=1.0.1",
+    "langchain-core>=1.2.6",
+    "langchain-google-genai>=4.1.1",
+    "langchain-google-vertexai>=3.2.1",
+    "pre-commit>=4.5.1",
+    "pytest>=9.0.2",
+    "python-dotenv>=1.2.1",
+    "requests>=2.32.5",
+]

@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: startup-checks
+        name: Startup checks
+        # Use `uv run` when available so checks run inside the uv project environment.
+        entry: uv run python scripts/startup_checks.py
+        language: system
+        files: '^.*$'
