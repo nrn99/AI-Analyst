@@ -10,7 +10,6 @@ from vertexai.preview import reasoning_engines
 
 load_dotenv()
 
-
 def _clean_env(value):
     if not value:
         return None
