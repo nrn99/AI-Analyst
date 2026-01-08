@@ -147,24 +147,11 @@ def get_localized_month_name(service, spreadsheet_id, when=None, locale=None):
     return _localized_month_name(locale, when)
 
 
-def _month_anchor(month=None, year=None, date_value=None):
-    if date_value:
-        return date_value
-    if month or year:
-        try:
-            y = int(year) if year else datetime.now().year
-            m = int(month) if month else datetime.now().month
-            return datetime(y, m, 1).strftime("%Y-%m-%d")
-        except Exception:
-            return None
-    return datetime.now().strftime("%Y-%m-%d")
-
-
 class SheetsLedgerStore:
     def __init__(self, service=None, spreadsheet_id=None):
         self._service = service
         self._spreadsheet_id = spreadsheet_id
-        self._logger = logging.getLogger("backend.storers.sheets")
+        self._logger = logging.getLogger("finance_proxy.ledger")
 
     def _ensure_service(self):
         if self._service is not None:
@@ -239,66 +226,13 @@ class SheetsLedgerStore:
                 return True
         return False
 
-    def list_transactions(self, month=None, year=None, date=None):
-        service = self._ensure_service()
-        spreadsheet_id = self._ensure_spreadsheet_id()
-
-        spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
-        locale = spreadsheet.get("properties", {}).get("locale", "en_US")
-        sheet_names = [
-            sheet.get("properties", {}).get("title", "")
-            for sheet in spreadsheet.get("sheets", [])
-        ]
-
-        anchor = _month_anchor(month=month, year=year, date_value=date)
-        month_name = get_localized_month_name(
-            service,
-            spreadsheet_id,
-            when=anchor,
-            locale=locale,
-        )
-
-        if month_name not in sheet_names:
-            return {"month": month_name, "count": 0, "transactions": []}
-
-        values = (
-            service.spreadsheets()
-            .values()
-            .get(
-                spreadsheetId=spreadsheet_id,
-                range=f"'{month_name}'!A:D",
-            )
-            .execute()
-            .get("values", [])
-        )
-
-        start_index = 1 if values and _row_is_header(values[0]) else 0
-        transactions = []
-        for row in values[start_index:]:
-            row_date = _normalize_date(row[0]) if len(row) > 0 else ""
-            row_desc = str(row[1]).strip() if len(row) > 1 else ""
-            row_cat = str(row[2]).strip() if len(row) > 2 else ""
-            row_amount = str(row[3]).strip() if len(row) > 3 else ""
-            if not any([row_date, row_desc, row_cat, row_amount]):
-                continue
-            transactions.append(
-                {
-                    "date": row_date,
-                    "description": row_desc,
-                    "category": row_cat,
-                    "amount": row_amount,
-                }
-            )
-
-        return {"month": month_name, "count": len(transactions), "transactions": transactions}
-
-    def append_transaction(self, amount, description, category="Misc", date=None):
+    def append_transaction(self, amount, description, category="Misc", date_value=None):
         service = self._ensure_service()
         spreadsheet_id = self._ensure_spreadsheet_id()
 
         description = (description or "").strip() or "Unknown"
         category = (category or "").strip() or "Uncategorized"
-        date_value = _normalize_date(date) or datetime.now().strftime("%Y-%m-%d")
+        date_value = _normalize_date(date_value) or datetime.now().strftime("%Y-%m-%d")
 
         spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
         locale = spreadsheet.get("properties", {}).get("locale", "en_US")
@@ -336,3 +270,21 @@ class SheetsLedgerStore:
 
         self._logger.info("Ledger appended: %s %s %s", date_value, amount, description)
         return {"status": "appended", "message": f"Success: Logged to '{month_name}' tab."}
+
+    def append_transactions(self, transactions):
+        appended = 0
+        duplicates = 0
+        results = []
+        for item in transactions:
+            res = self.append_transaction(
+                amount=item.get("amount"),
+                description=item.get("description"),
+                category=item.get("category"),
+                date_value=item.get("date"),
+            )
+            results.append(res)
+            if res.get("status") == "appended":
+                appended += 1
+            elif res.get("status") == "duplicate":
+                duplicates += 1
+        return {"appended": appended, "duplicates": duplicates, "results": results}

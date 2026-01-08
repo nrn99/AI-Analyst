@@ -10,6 +10,9 @@ Create a `.env` file (see `.env.example`) or set environment variables:
 - `GCP_PROJECT_ID` - GCP project id (default: `nestaai`)
 - `GCP_LOCATION` - Vertex region (default: `europe-west1`)
 - `REASONING_ENGINE_RESOURCE` - full resource name of the Reasoning Engine
+- `GOOGLE_APPLICATION_CREDENTIALS` - service account JSON path (Sheets access)
+- `LEDGER_SPREADSHEET_ID` - target ledger sheet ID
+- `CATEGORY_SUGGESTION_MODE` - `model` (default) or `heuristic`
 
 For local auth, use ADC:
 
@@ -21,7 +24,7 @@ gcloud auth application-default login
 
 ```bash
 uv init
-uv add fastapi uvicorn google-cloud-aiplatform[agent_engines] python-dotenv
+uv add fastapi uvicorn google-cloud-aiplatform[agent_engines] python-dotenv python-multipart openpyxl pypdf google-api-python-client google-auth google-auth-httplib2
 ```
 
 Generate a key:
@@ -67,3 +70,19 @@ Response body:
 ```json
 {"reply": "AI response string"}
 ```
+
+`POST /ingest/preview` (multipart form-data)
+
+Response body includes `transactions` with `category_suggested` and `needs_review`.
+
+`POST /ingest/commit`
+
+Request body:
+
+```json
+{"transactions": [{"date":"2024-08-01","description":"Coffee","amount":-4.5,"category_approved":"Dining"}]}
+```
+
+`GET /categories`
+
+Returns the fixed categories list for UI review flows.

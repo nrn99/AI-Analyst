@@ -2,11 +2,14 @@ import logging
 import os
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import vertexai
 from vertexai.preview import reasoning_engines
+
+from ingest import FIXED_CATEGORIES, UNCATEGORIZED, parse_statement
+from ledger import SheetsLedgerStore
 
 load_dotenv()
 
@@ -81,6 +84,18 @@ class ChatResponse(BaseModel):
     reply: str
 
 
+class TransactionApproval(BaseModel):
+    date: str
+    description: str
+    amount: float
+    category_approved: str | None = None
+    category_suggested: str | None = None
+
+
+class CommitRequest(BaseModel):
+    transactions: list[TransactionApproval] = Field(default_factory=list)
+
+
 def _extract_reply(result):
     if isinstance(result, dict):
         for key in ("output", "response", "reply", "text"):
@@ -88,6 +103,16 @@ def _extract_reply(result):
                 return str(result[key])
         return str(result)
     return str(result)
+
+
+def _normalize_category(value):
+    if not value:
+        return UNCATEGORIZED
+    raw = str(value).strip()
+    for category in FIXED_CATEGORIES:
+        if raw.lower() == category.lower():
+            return category
+    return UNCATEGORIZED
 
 
 app = FastAPI(title="Lovable Vertex AI Proxy", version="1.0.0")
@@ -124,6 +149,74 @@ async def chat(payload: ChatRequest):
         raise HTTPException(status_code=500, detail="Reasoning engine query failed")
 
     return {"reply": _extract_reply(result)}
+
+
+@app.get("/categories", dependencies=[Depends(require_api_key)])
+def list_categories():
+    return {"categories": FIXED_CATEGORIES}
+
+
+@app.post("/ingest/preview", dependencies=[Depends(require_api_key)])
+async def ingest_preview(
+    file: UploadFile = File(...),
+    limit: int = Query(500, ge=1, le=5000),
+):
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    try:
+        result = parse_statement(
+            data=data,
+            filename=file.filename or "",
+            content_type=file.content_type or "",
+            project_id=PROJECT_ID,
+            location=LOCATION,
+        )
+    except Exception as exc:
+        LOGGER.exception("Failed to parse statement: %s", exc)
+        raise HTTPException(status_code=400, detail="Failed to parse statement file")
+
+    transactions = result.get("transactions", [])
+    truncated = False
+    if limit and len(transactions) > limit:
+        result["transactions"] = transactions[:limit]
+        truncated = True
+
+    result["truncated"] = truncated
+    result["needs_review_count"] = sum(1 for t in result.get("transactions", []) if t.get("needs_review"))
+    result["total_transactions"] = len(transactions)
+    return result
+
+
+@app.post("/ingest/commit", dependencies=[Depends(require_api_key)])
+async def ingest_commit(payload: CommitRequest):
+    if not payload.transactions:
+        raise HTTPException(status_code=400, detail="No transactions provided")
+
+    normalized = []
+    for item in payload.transactions:
+        category = _normalize_category(item.category_approved or item.category_suggested)
+        normalized.append(
+            {
+                "date": item.date,
+                "description": item.description,
+                "amount": item.amount,
+                "category": category,
+            }
+        )
+
+    try:
+        store = SheetsLedgerStore()
+        result = store.append_transactions(normalized)
+    except Exception as exc:
+        LOGGER.exception("Commit failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to write transactions to ledger")
+
+    return {
+        "appended": result.get("appended", 0),
+        "duplicates": result.get("duplicates", 0),
+    }
 
 
 if __name__ == "__main__":

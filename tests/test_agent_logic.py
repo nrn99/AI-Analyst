@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from backend.processors.agent import list_uncategorized_transactions
 from backend.storers.sheets import DEFAULT_HEADERS, SheetsLedgerStore, get_localized_month_name
 
 
@@ -145,3 +146,53 @@ def test_append_to_spreadsheet_skips_duplicate():
 
     assert res["status"] == "duplicate"
     assert fake._spreadsheets.values().appended is False
+
+
+def test_list_transactions_returns_month_rows():
+    month_name = get_localized_month_name(
+        FakeService(locale="en_US"),
+        spreadsheet_id="sheet123",
+        when="2026-01-06",
+    )
+    values = [
+        DEFAULT_HEADERS,
+        ["2026-01-06", "Coffee", "Food", "5.00"],
+        ["2026-01-07", "Bus", "Travel", "-2.50"],
+    ]
+    fake = FakeService(
+        locale="en_US",
+        sheets=[{"properties": {"title": month_name}}],
+        values=values,
+    )
+    store = SheetsLedgerStore(service=fake, spreadsheet_id="sheet123")
+    res = store.list_transactions(date="2026-01-06")
+
+    assert res["month"] == month_name
+    assert res["count"] == 2
+    assert res["transactions"][0]["description"] == "Coffee"
+
+
+def test_list_uncategorized_transactions_filters_rows():
+    month_name = get_localized_month_name(
+        FakeService(locale="en_US"),
+        spreadsheet_id="sheet123",
+        when="2026-01-06",
+    )
+    values = [
+        DEFAULT_HEADERS,
+        ["2026-01-06", "Coffee", "Uncategorized", "5.00"],
+        ["2026-01-07", "Bus", "Travel", "-2.50"],
+    ]
+    fake = FakeService(
+        locale="en_US",
+        sheets=[{"properties": {"title": month_name}}],
+        values=values,
+    )
+    res = list_uncategorized_transactions(
+        service=fake,
+        spreadsheet_id="sheet123",
+        date="2026-01-06",
+    )
+
+    assert res["count"] == 1
+    assert res["transactions"][0]["description"] == "Coffee"

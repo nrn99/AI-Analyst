@@ -1,35 +1,227 @@
 import logging
 import os
+import re
 import sys
+from datetime import datetime, timedelta
 
 from env_utils import resolve_gcp_project_id
 from backend.storers.sheets import SheetsLedgerStore
 
-def append_to_spreadsheet(
-    amount: float,
-    description: str,
-    category: str = "Misc",
+_MONTH_NAME_MAP = {
+    "january": 1,
+    "jan": 1,
+    "february": 2,
+    "feb": 2,
+    "march": 3,
+    "mar": 3,
+    "april": 4,
+    "apr": 4,
+    "may": 5,
+    "june": 6,
+    "jun": 6,
+    "july": 7,
+    "jul": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "sept": 9,
+    "october": 10,
+    "oct": 10,
+    "november": 11,
+    "nov": 11,
+    "december": 12,
+    "dec": 12,
+    "januari": 1,
+    "februari": 2,
+    "mars": 3,
+    "april": 4,
+    "maj": 5,
+    "juni": 6,
+    "juli": 7,
+    "augusti": 8,
+    "september": 9,
+    "oktober": 10,
+    "november": 11,
+    "december": 12,
+    "gennaio": 1,
+    "febbraio": 2,
+    "marzo": 3,
+    "aprile": 4,
+    "maggio": 5,
+    "giugno": 6,
+    "luglio": 7,
+    "agosto": 8,
+    "settembre": 9,
+    "ottobre": 10,
+    "novembre": 11,
+    "dicembre": 12,
+}
+
+_LIST_KEYWORDS = {
+    "transactions",
+    "transaction",
+    "ledger",
+    "statement",
+    "history",
+    "expenses",
+    "expense",
+    "movements",
+    "movimenti",
+    "transazioni",
+    "spend",
+    "spent",
+    "balance",
+}
+
+UNCATEGORIZED = "Uncategorized"
+FIXED_CATEGORIES = [
+    "Income",
+    "Housing",
+    "Utilities",
+    "Groceries",
+    "Dining",
+    "Transport",
+    "Travel",
+    "Shopping",
+    "Subscriptions",
+    "Health",
+    "Education",
+    "Business",
+    "Taxes",
+    "Fees",
+    "Transfers",
+    "Savings/Investments",
+    UNCATEGORIZED,
+]
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.strip().lower().split())
+
+
+def _parse_month_year(text: str):
+    year = None
+    year_match = re.search(r"\b(20\d{2})\b", text)
+    if year_match:
+        year = int(year_match.group(1))
+
+    for name, month in _MONTH_NAME_MAP.items():
+        if re.search(rf"\b{name}\b", text):
+            return month, year
+    return None, year
+
+
+def _last_month():
+    today = datetime.now().date()
+    first = today.replace(day=1)
+    prev = first - timedelta(days=1)
+    return prev.month, prev.year
+
+
+def _route_user_input(text: str):
+    normalized = _normalize(text)
+    if not normalized:
+        return {"action": "clarify", "message": "Please enter a message."}
+
+    if "uncategorized" in normalized or "uncategorised" in normalized or "needs review" in normalized:
+        if "last month" in normalized or "previous month" in normalized or "forrige manad" in normalized:
+            month, year = _last_month()
+            return {"action": "uncategorized", "params": {"month": month, "year": year}}
+        if "this month" in normalized or "current month" in normalized or "denna manad" in normalized:
+            return {"action": "uncategorized", "params": {}}
+        month, year = _parse_month_year(normalized)
+        params = {}
+        if month:
+            params["month"] = month
+        if year:
+            params["year"] = year
+        return {"action": "uncategorized", "params": params}
+
+    if "last month" in normalized or "previous month" in normalized or "forrige manad" in normalized:
+        month, year = _last_month()
+        return {"action": "list", "params": {"month": month, "year": year}}
+
+    if "this month" in normalized or "current month" in normalized or "denna manad" in normalized:
+        return {"action": "list", "params": {}}
+
+    if any(keyword in normalized for keyword in _LIST_KEYWORDS):
+        month, year = _parse_month_year(normalized)
+        params = {}
+        if month:
+            params["month"] = month
+        if year:
+            params["year"] = year
+        return {"action": "list", "params": params}
+
+    return {"action": "llm", "params": {}}
+
+
+def _format_transactions(result: dict) -> str:
+    month = result.get("month", "this month")
+    transactions = result.get("transactions", [])
+    if not transactions:
+        return f"No transactions found for {month}."
+
+    lines = [f"{t['date']} | {t['description']} | {t['category']} | {t['amount']}" for t in transactions]
+    header = f"Transactions for {month} ({len(transactions)}):"
+    return header + "\\n" + "\\n".join(lines)
+
+
+def list_month_transactions(
+    month: int | None = None,
+    year: int | None = None,
     date: str | None = None,
     *,
     service=None,
     spreadsheet_id=None,
 ):
     """
-    Logs a transaction to the finance ledger.
+    Fetch transactions for a specific month.
     Args:
-        amount: The numerical value (use negative for expenses).
-        description: A short note about the transaction.
-        category: The budget category (e.g., Food, Travel).
-        date: Optional transaction date (YYYY-MM-DD).
+        month: Month number (1-12). Defaults to current month when omitted.
+        year: Year number. Defaults to current year when omitted.
+        date: Optional anchor date (YYYY-MM-DD) to derive the month.
+    Returns:
+        Dict with month name, count, and transactions list.
     """
     store = SheetsLedgerStore(service=service, spreadsheet_id=spreadsheet_id)
-    result = store.append_transaction(
-        amount=amount,
-        description=description,
-        category=category,
+    return store.list_transactions(month=month, year=year, date=date)
+
+
+def list_uncategorized_transactions(
+    month: int | None = None,
+    year: int | None = None,
+    date: str | None = None,
+    *,
+    service=None,
+    spreadsheet_id=None,
+):
+    """
+    Fetch transactions needing category review.
+    """
+    result = list_month_transactions(
+        month=month,
+        year=year,
         date=date,
+        service=service,
+        spreadsheet_id=spreadsheet_id,
     )
-    return result.get("message", "Logged")
+    transactions = []
+    for transaction in result.get("transactions", []):
+        category = _normalize(transaction.get("category", ""))
+        if not category or category == _normalize(UNCATEGORIZED):
+            transactions.append(transaction)
+    result["transactions"] = transactions
+    result["count"] = len(transactions)
+    return result
+
+
+def list_categories():
+    """
+    Return the fixed category list.
+    """
+    return {"categories": FIXED_CATEGORIES}
 
 
 # 3. The Agent Class
@@ -98,8 +290,7 @@ class FinanceAnalystAgent:
                 "system",
                 """You are a multilingual Personal Finance Assistant.
                 You can understand Swedish, Italian, and English.
-                Always log expenses as negative numbers.
-                If a category isn't clear, use your best judgment or ask for clarification.""",
+                Use available tools to read ledger data when asked about transactions.""",
             ),
             ("human", "{input}"),
             ("placeholder", "{agent_scratchpad}"),
@@ -107,19 +298,24 @@ class FinanceAnalystAgent:
 
         # Convert callables to tool objects
         try:
-            if hasattr(Tool, "from_function"):
-                tool_obj = Tool.from_function(
-                    append_to_spreadsheet,
-                    name=append_to_spreadsheet.__name__,
-                    description=(append_to_spreadsheet.__doc__ or ""),
+            def _build_tool(fn):
+                if hasattr(Tool, "from_function"):
+                    return Tool.from_function(
+                        fn,
+                        name=fn.__name__,
+                        description=(fn.__doc__ or ""),
+                    )
+                return Tool(
+                    fn,
+                    name=fn.__name__,
+                    description=(fn.__doc__ or ""),
                 )
-            else:
-                tool_obj = Tool(
-                    append_to_spreadsheet,
-                    name=append_to_spreadsheet.__name__,
-                    description=(append_to_spreadsheet.__doc__ or ""),
-                )
-            tools = [tool_obj]
+
+            tools = [
+                _build_tool(list_month_transactions),
+                _build_tool(list_uncategorized_transactions),
+                _build_tool(list_categories),
+            ]
             self._logger.info("Prepared tools: %s", [getattr(t, "name", str(t)) for t in tools])
         except Exception as exc:
             msg = f"Failed to prepare tools: {exc}"
@@ -145,6 +341,18 @@ class FinanceAnalystAgent:
     def query(self, input_text: str | None = None, input: str | None = None, **_kwargs):
         if input_text is None:
             input_text = input
+        input_text = (input_text or "").strip()
+
+        route = _route_user_input(input_text)
+        if route.get("action") == "clarify":
+            return route.get("message", "Please clarify your request.")
+        if route.get("action") == "list":
+            result = list_month_transactions(**route.get("params", {}))
+            return _format_transactions(result)
+        if route.get("action") == "uncategorized":
+            result = list_uncategorized_transactions(**route.get("params", {}))
+            return _format_transactions(result)
+
         if not self.executor:
             try:
                 self.set_up()
