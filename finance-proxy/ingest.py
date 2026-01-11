@@ -11,26 +11,7 @@ from openpyxl import load_workbook
 from pypdf import PdfReader
 from vertexai.preview.generative_models import GenerativeModel
 
-UNCATEGORIZED = "Uncategorized"
-FIXED_CATEGORIES = [
-    "Income",
-    "Housing",
-    "Utilities",
-    "Groceries",
-    "Dining",
-    "Transport",
-    "Travel",
-    "Shopping",
-    "Subscriptions",
-    "Health",
-    "Education",
-    "Business",
-    "Taxes",
-    "Fees",
-    "Transfers",
-    "Savings/Investments",
-    UNCATEGORIZED,
-]
+from categories import FIXED_CATEGORIES, UNCATEGORIZED
 
 _CATEGORY_HINTS = {
     "Housing": ["rent", "mortgage", "lease", "hyra"],

@@ -10,7 +10,7 @@ Create a `.env` file (see `.env.example`) or set environment variables:
 - `GCP_PROJECT_ID` - GCP project id (default: `nestaai`)
 - `GCP_LOCATION` - Vertex region (default: `europe-west1`)
 - `REASONING_ENGINE_RESOURCE` - full resource name of the Reasoning Engine
-- `GOOGLE_APPLICATION_CREDENTIALS` - service account JSON path (Sheets access)
+- `GOOGLE_APPLICATION_CREDENTIALS` - local dev only; Cloud Run uses ADC
 - `LEDGER_SPREADSHEET_ID` - target ledger sheet ID
 - `CATEGORY_SUGGESTION_MODE` - `model` (default) or `heuristic`
 
@@ -50,7 +50,7 @@ uv run python main.py
 ```bash
 gcloud run deploy finance-bridge \
   --source . \
-  --env-vars-file .env \
+  --env-vars-file env.yaml \
   --region europe-west1 \
   --allow-unauthenticated
 ```

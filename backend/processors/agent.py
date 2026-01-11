@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from env_utils import resolve_gcp_project_id
 from backend.storers.sheets import SheetsLedgerStore
+from backend.shared.categories import FIXED_CATEGORIES, UNCATEGORIZED
 
 _MONTH_NAME_MAP = {
     "january": 1,
@@ -73,28 +74,6 @@ _LIST_KEYWORDS = {
     "spent",
     "balance",
 }
-
-UNCATEGORIZED = "Uncategorized"
-FIXED_CATEGORIES = [
-    "Income",
-    "Housing",
-    "Utilities",
-    "Groceries",
-    "Dining",
-    "Transport",
-    "Travel",
-    "Shopping",
-    "Subscriptions",
-    "Health",
-    "Education",
-    "Business",
-    "Taxes",
-    "Fees",
-    "Transfers",
-    "Savings/Investments",
-    UNCATEGORIZED,
-]
-
 
 def _normalize(text: str) -> str:
     return " ".join(text.strip().lower().split())

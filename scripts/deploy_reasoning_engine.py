@@ -65,7 +65,12 @@ def main():
             "google-auth-oauthlib",
             "python-dotenv"
         ],
-        extra_packages=["env_utils.py", "backend"]
+        extra_packages=[
+            "env_utils.py",
+            "backend",
+            "finance-proxy/ledger.py",
+            "finance-proxy/categories.py",
+        ]
     )
 
     print(f"\n✅ SUCCESS! Agent live at: {remote_agent.resource_name}", flush=True)

@@ -1,5 +1,6 @@
 # Environment and credentials
 .env
+finance-proxy/env.yaml
 nesta_service_account.json
 
 # Python

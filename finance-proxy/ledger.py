@@ -3,6 +3,9 @@ import os
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
+import google.auth
+from googleapiclient.discovery import build
+
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 DEFAULT_HEADERS = ["Datum", "Beskrivning", "Kategori", "Belopp"]
 
@@ -147,6 +150,24 @@ def get_localized_month_name(service, spreadsheet_id, when=None, locale=None):
     return _localized_month_name(locale, when)
 
 
+def get_sheets_service():
+    credentials, _ = google.auth.default(scopes=SCOPES)
+    return build("sheets", "v4", credentials=credentials)
+
+
+def _month_anchor(month=None, year=None, date_value=None):
+    if date_value:
+        return date_value
+    if month or year:
+        try:
+            y = int(year) if year else datetime.now().year
+            m = int(month) if month else datetime.now().month
+            return datetime(y, m, 1).strftime("%Y-%m-%d")
+        except Exception:
+            return None
+    return datetime.now().strftime("%Y-%m-%d")
+
+
 class SheetsLedgerStore:
     def __init__(self, service=None, spreadsheet_id=None):
         self._service = service
@@ -157,18 +178,11 @@ class SheetsLedgerStore:
         if self._service is not None:
             return self._service
         try:
-            from googleapiclient.discovery import build
-            from google.oauth2 import service_account
+            self._service = get_sheets_service()
         except Exception as exc:
             raise RuntimeError(
-                "googleapiclient and google.oauth2 are required when no service is passed"
+                "google.auth and googleapiclient are required to initialize Sheets access"
             ) from exc
-
-        key_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        if not key_path:
-            raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS is not set")
-        creds = service_account.Credentials.from_service_account_file(key_path, scopes=SCOPES)
-        self._service = build("sheets", "v4", credentials=creds)
         return self._service
 
     def _ensure_spreadsheet_id(self):
@@ -225,6 +239,61 @@ class SheetsLedgerStore:
             ):
                 return True
         return False
+
+    def list_transactions(self, month=None, year=None, date=None, date_value=None):
+        service = self._ensure_service()
+        spreadsheet_id = self._ensure_spreadsheet_id()
+
+        spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+        locale = spreadsheet.get("properties", {}).get("locale", "en_US")
+        sheet_names = [
+            sheet.get("properties", {}).get("title", "")
+            for sheet in spreadsheet.get("sheets", [])
+        ]
+
+        if date_value is None:
+            date_value = date
+        anchor = _month_anchor(month=month, year=year, date_value=date_value)
+        month_name = get_localized_month_name(
+            service,
+            spreadsheet_id,
+            when=anchor,
+            locale=locale,
+        )
+
+        if month_name not in sheet_names:
+            return {"month": month_name, "count": 0, "transactions": []}
+
+        values = (
+            service.spreadsheets()
+            .values()
+            .get(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{month_name}'!A:D",
+            )
+            .execute()
+            .get("values", [])
+        )
+
+        start_index = 1 if values and _row_is_header(values[0]) else 0
+        transactions = []
+        for row in values[start_index:]:
+            row_date = _normalize_date(row[0]) if len(row) > 0 else ""
+            row_desc = str(row[1]).strip() if len(row) > 1 else ""
+            row_cat = str(row[2]).strip() if len(row) > 2 else ""
+            row_amount = str(row[3]).strip() if len(row) > 3 else ""
+            if not any([row_date, row_desc, row_cat, row_amount]):
+                continue
+            transactions.append(
+                {
+                    "date": row_date,
+                    "description": row_desc,
+                    "category": row_cat,
+                    "amount": row_amount,
+                }
+            )
+
+        return {"month": month_name, "count": len(transactions), "transactions": transactions}
 
     def append_transaction(self, amount, description, category="Misc", date_value=None):
         service = self._ensure_service()

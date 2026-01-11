@@ -1,5 +1,7 @@
 import logging
 import os
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
@@ -8,7 +10,8 @@ from pydantic import BaseModel, Field
 import vertexai
 from vertexai.preview import reasoning_engines
 
-from ingest import FIXED_CATEGORIES, UNCATEGORIZED, parse_statement
+from categories import FIXED_CATEGORIES, UNCATEGORIZED
+from ingest import parse_statement
 from ledger import SheetsLedgerStore
 
 load_dotenv()
@@ -115,6 +118,44 @@ def _normalize_category(value):
     return UNCATEGORIZED
 
 
+_AUDIT_EXCLUDE = {"internal", "transfer", "transfers"}
+_AUDIT_INCOME = {"external income", "income"}
+_AUDIT_MACHINE = {"rent", "food", "transport", "insurance", "medical", "tithe"}
+_AUDIT_FLOW = {"gym", "hair", "dining", "hobbies"}
+_AUDIT_SOVEREIGNTY = {"savings", "investment", "investments", "savings/investments"}
+
+
+def _normalize_label(value):
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _parse_amount(value):
+    if value is None:
+        return Decimal("0")
+    raw = str(value).strip()
+    if not raw:
+        return Decimal("0")
+    raw = raw.replace(" ", "")
+    if "," in raw and "." in raw:
+        raw = raw.replace(",", "")
+    else:
+        raw = raw.replace(",", ".")
+    try:
+        return Decimal(raw)
+    except InvalidOperation:
+        return Decimal("0")
+
+
+def _as_amount(value):
+    return float(value.quantize(Decimal("0.01")))
+
+
+def _as_percentage(total, income):
+    if income <= 0:
+        return 0.0
+    return float((total / income).quantize(Decimal("0.0001")))
+
+
 app = FastAPI(title="Lovable Vertex AI Proxy", version="1.0.0")
 
 app.add_middleware(
@@ -154,6 +195,91 @@ async def chat(payload: ChatRequest):
 @app.get("/categories", dependencies=[Depends(require_api_key)])
 def list_categories():
     return {"categories": FIXED_CATEGORIES}
+
+
+@app.get("/audit/summary", dependencies=[Depends(require_api_key)])
+def audit_summary():
+    try:
+        store = SheetsLedgerStore()
+        result = store.list_transactions()
+    except Exception as exc:
+        LOGGER.exception("Failed to fetch ledger data: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to fetch ledger data")
+
+    transactions = result.get("transactions", [])
+    if not transactions:
+        return {
+            "income": 0,
+            "machine": {"total": 0, "percentage": 0, "status": "No Data"},
+            "flow": {"total": 0, "percentage": 0, "status": "No Data"},
+            "sovereignty": {"total": 0, "percentage": 0, "status": "No Data"},
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
+
+    income_total = Decimal("0")
+    machine_total = Decimal("0")
+    flow_spend = Decimal("0")
+    sovereignty_total = Decimal("0")
+    tithe_total = Decimal("0")
+
+    for entry in transactions:
+        category = _normalize_label(entry.get("category", ""))
+        if not category or category in _AUDIT_EXCLUDE:
+            continue
+        amount = _parse_amount(entry.get("amount"))
+        if amount == 0:
+            continue
+        amount = abs(amount)
+
+        if category in _AUDIT_INCOME:
+            income_total += amount
+        if category in _AUDIT_MACHINE:
+            machine_total += amount
+            if category == "tithe":
+                tithe_total += amount
+        if category in _AUDIT_FLOW:
+            flow_spend += amount
+        if category in _AUDIT_SOVEREIGNTY:
+            sovereignty_total += amount
+
+    flow_target = income_total * Decimal("0.30")
+    flow_unspent = flow_target - flow_spend
+    if flow_unspent < 0:
+        flow_unspent = Decimal("0")
+    flow_total = flow_spend + flow_unspent
+
+    if income_total <= 0:
+        machine_status = "No Data"
+        flow_status = "No Data"
+    else:
+        machine_status = "Antifragile" if machine_total <= income_total * Decimal("0.50") else "Fragile"
+        flow_status = "Disciplined" if flow_total <= income_total * Decimal("0.30") else "Undisciplined"
+
+    sovereignty_status = (
+        "Steward" if tithe_total > 0 and sovereignty_total > 0 else "Needs Stewardship"
+    )
+    if income_total <= 0:
+        sovereignty_status = "No Data"
+
+    return {
+        "income": _as_amount(income_total),
+        "machine": {
+            "total": _as_amount(machine_total),
+            "percentage": _as_percentage(machine_total, income_total),
+            "status": machine_status,
+        },
+        "flow": {
+            "total": _as_amount(flow_total),
+            "percentage": _as_percentage(flow_total, income_total),
+            "status": flow_status,
+        },
+        "sovereignty": {
+            "total": _as_amount(sovereignty_total),
+            "percentage": _as_percentage(sovereignty_total, income_total),
+            "status": sovereignty_status,
+        },
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @app.post("/ingest/preview", dependencies=[Depends(require_api_key)])

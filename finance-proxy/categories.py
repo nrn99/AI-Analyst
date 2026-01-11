@@ -1,0 +1,20 @@
+UNCATEGORIZED = "Uncategorized"
+FIXED_CATEGORIES = [
+    "Income",
+    "Housing",
+    "Utilities",
+    "Groceries",
+    "Dining",
+    "Transport",
+    "Travel",
+    "Shopping",
+    "Subscriptions",
+    "Health",
+    "Education",
+    "Business",
+    "Taxes",
+    "Fees",
+    "Transfers",
+    "Savings/Investments",
+    UNCATEGORIZED,
+]

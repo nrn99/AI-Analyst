@@ -115,7 +115,7 @@ def test_get_localized_month_name_it():
     assert name == italian[datetime.now().month - 1]
 
 
-def test_append_to_spreadsheet_creates_tab_and_appends():
+def test_ledger_append_creates_tab_and_appends():
     fake = FakeService(locale="en_US", sheets=[{"properties": {"title": "Other"}}])
     store = SheetsLedgerStore(service=fake, spreadsheet_id="sheet123")
     res = store.append_transaction(10.0, "Test", "Misc", date="2026-01-06")
@@ -126,7 +126,7 @@ def test_append_to_spreadsheet_creates_tab_and_appends():
     assert fake._spreadsheets.values().appended is True
 
 
-def test_append_to_spreadsheet_skips_duplicate():
+def test_ledger_append_skips_duplicate():
     month_name = get_localized_month_name(
         FakeService(locale="en_US"),
         spreadsheet_id="sheet123",
