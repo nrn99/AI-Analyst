@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field
 import vertexai
 from vertexai.preview import reasoning_engines
 
-from categories import FIXED_CATEGORIES, UNCATEGORIZED
-from ingest import parse_statement
-from ledger import SheetsLedgerStore
+from core.categories import FIXED_CATEGORIES, UNCATEGORIZED
+from core.ingest import parse_statement
+from core.ledger import SheetsLedgerStore
 
 load_dotenv()
 
@@ -70,13 +70,7 @@ except Exception as exc:
     LOGGER.exception("Failed to initialize Reasoning Engine: %s", exc)
 
 
-def require_api_key(x_api_key: str = Header(None, alias="X-Api-Key")):
-    expected = _clean_env(os.getenv("LOVABLE_PROXY_KEY"))
-    if not expected:
-        raise HTTPException(status_code=500, detail="Server misconfigured: LOVABLE_PROXY_KEY not set")
-    if x_api_key != expected:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    return True
+
 
 
 class ChatRequest(BaseModel):
@@ -174,7 +168,7 @@ def health():
     return {"status": status, "detail": detail}
 
 
-@app.post("/chat", response_model=ChatResponse, dependencies=[Depends(require_api_key)])
+@app.post("/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest):
     if INIT_ERROR or not REMOTE_AGENT:
         raise HTTPException(status_code=500, detail="Reasoning engine not initialized")
@@ -192,12 +186,12 @@ async def chat(payload: ChatRequest):
     return {"reply": _extract_reply(result)}
 
 
-@app.get("/categories", dependencies=[Depends(require_api_key)])
+@app.get("/categories")
 def list_categories():
     return {"categories": FIXED_CATEGORIES}
 
 
-@app.get("/audit/summary", dependencies=[Depends(require_api_key)])
+@app.get("/audit/summary")
 def audit_summary():
     try:
         store = SheetsLedgerStore()
@@ -282,7 +276,7 @@ def audit_summary():
     }
 
 
-@app.post("/ingest/preview", dependencies=[Depends(require_api_key)])
+@app.post("/ingest/preview")
 async def ingest_preview(
     file: UploadFile = File(...),
     limit: int = Query(500, ge=1, le=5000),
@@ -315,7 +309,7 @@ async def ingest_preview(
     return result
 
 
-@app.post("/ingest/commit", dependencies=[Depends(require_api_key)])
+@app.post("/ingest/commit")
 async def ingest_commit(payload: CommitRequest):
     if not payload.transactions:
         raise HTTPException(status_code=400, detail="No transactions provided")

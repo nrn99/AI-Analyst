@@ -11,7 +11,7 @@ from openpyxl import load_workbook
 from pypdf import PdfReader
 from vertexai.preview.generative_models import GenerativeModel
 
-from categories import FIXED_CATEGORIES, UNCATEGORIZED
+from .categories import FIXED_CATEGORIES, UNCATEGORIZED
 
 _CATEGORY_HINTS = {
     "Housing": ["rent", "mortgage", "lease", "hyra"],
@@ -167,6 +167,40 @@ def _header_map(headers):
     return mapping
 
 
+def _find_header(rows, limit=20):
+    """
+    Scans the first `limit` rows to find the most likely header row.
+    Returns (header_row_index, mapping).
+    """
+    best_idx = 0
+    best_mapping = {}
+    best_score = 0
+
+    for idx, row in enumerate(rows[:limit]):
+        # Convert row values to list of strings
+        headers = [str(cell) for cell in row if cell is not None]
+        mapping = _header_map(headers)
+        
+        # specific score: how many critical fields found
+        score = len(mapping)
+        
+        # We need at least Date and Amount usually, or Descripton and Amount
+        has_critical = ("date" in mapping and "amount" in mapping) or \
+                       ("date" in mapping and "debit" in mapping) or \
+                       ("description" in mapping and "amount" in mapping)
+
+        if score > best_score and has_critical:
+            best_score = score
+            best_mapping = mapping
+            best_idx = idx
+
+    if best_score > 0:
+        return best_idx, best_mapping
+    
+    # Fallback to first row if nothing found
+    return 0, _header_map(rows[0] if rows else [])
+
+
 def _parse_csv(data):
     text = None
     for encoding in ("utf-8-sig", "utf-8", "latin-1"):
@@ -189,25 +223,31 @@ def _parse_csv(data):
     if not rows:
         return [], {}
 
-    header = rows[0]
-    mapping = _header_map(header)
+    header_idx, mapping = _find_header(rows)
     transactions = []
-    start_idx = 1 if mapping else 0
+    
+    # Start usually after the header
+    start_idx = header_idx + 1
+
     for idx, row in enumerate(rows[start_idx:], start=start_idx):
         if mapping:
-            date_val = row[mapping.get("date", 0)] if mapping.get("date") is not None else None
-            desc_val = row[mapping.get("description", 1)] if mapping.get("description") is not None else None
+            date_val = row[mapping.get("date")] if "date" in mapping and mapping["date"] < len(row) else None
+            desc_val = row[mapping.get("description")] if "description" in mapping and mapping["description"] < len(row) else None
+            
             amount_val = None
-            if "amount" in mapping:
+            if "amount" in mapping and mapping["amount"] < len(row):
                 amount_val = row[mapping["amount"]]
             else:
-                debit = row[mapping.get("debit")] if mapping.get("debit") is not None else None
-                credit = row[mapping.get("credit")] if mapping.get("credit") is not None else None
+                debit = row[mapping.get("debit")] if "debit" in mapping and mapping["debit"] < len(row) else None
+                credit = row[mapping.get("credit")] if "credit" in mapping and mapping["credit"] < len(row) else None
                 debit_norm = _normalize_amount(debit) or "0"
                 credit_norm = _normalize_amount(credit) or "0"
-                amount_val = str(Decimal(credit_norm) - Decimal(debit_norm))
-            currency_val = row[mapping.get("currency")] if mapping.get("currency") is not None else None
+                if debit or credit:
+                    amount_val = str(Decimal(credit_norm) - Decimal(debit_norm))
+            
+            currency_val = row[mapping.get("currency")] if "currency" in mapping and mapping["currency"] < len(row) else None
         else:
+            # Fallback 0,1,2,3
             date_val = row[0] if len(row) > 0 else None
             desc_val = row[1] if len(row) > 1 else None
             amount_val = row[2] if len(row) > 2 else None
@@ -238,24 +278,28 @@ def _parse_xlsx(data):
     if not rows:
         return [], {}
 
-    mapping = _header_map(rows[0])
+    header_idx, mapping = _find_header(rows)
     transactions = []
-    start_idx = 1 if mapping else 0
+    start_idx = header_idx + 1
+
     for idx, row in enumerate(rows[start_idx:], start=start_idx):
         row = list(row)
         if mapping:
-            date_val = row[mapping.get("date", 0)] if mapping.get("date") is not None else None
-            desc_val = row[mapping.get("description", 1)] if mapping.get("description") is not None else None
+            date_val = row[mapping.get("date")] if "date" in mapping and mapping["date"] < len(row) else None
+            desc_val = row[mapping.get("description")] if "description" in mapping and mapping["description"] < len(row) else None
+            
             amount_val = None
-            if "amount" in mapping:
+            if "amount" in mapping and mapping["amount"] < len(row):
                 amount_val = row[mapping["amount"]]
             else:
-                debit = row[mapping.get("debit")] if mapping.get("debit") is not None else None
-                credit = row[mapping.get("credit")] if mapping.get("credit") is not None else None
+                debit = row[mapping.get("debit")] if "debit" in mapping and mapping["debit"] < len(row) else None
+                credit = row[mapping.get("credit")] if "credit" in mapping and mapping["credit"] < len(row) else None
                 debit_norm = _normalize_amount(debit) or "0"
                 credit_norm = _normalize_amount(credit) or "0"
-                amount_val = str(Decimal(credit_norm) - Decimal(debit_norm))
-            currency_val = row[mapping.get("currency")] if mapping.get("currency") is not None else None
+                if debit or credit:
+                    amount_val = str(Decimal(credit_norm) - Decimal(debit_norm))
+            
+            currency_val = row[mapping.get("currency")] if "currency" in mapping and mapping["currency"] < len(row) else None
         else:
             date_val = row[0] if len(row) > 0 else None
             desc_val = row[1] if len(row) > 1 else None
