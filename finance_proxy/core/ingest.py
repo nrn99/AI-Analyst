@@ -1,6 +1,7 @@
 import csv
 import hashlib
 import io
+import logging
 import os
 import re
 from datetime import datetime
@@ -152,13 +153,18 @@ def _extract_metadata(text):
 def _header_map(headers):
     normalized = [str(h or "").strip().lower() for h in headers]
     mapping = {}
+    # Restricted Swedbank Mapping
     header_aliases = {
-        "date": ["date", "datum", "transaction date", "booked", "bokforingsdag"],
-        "description": ["description", "beskrivning", "text", "merchant", "details"],
-        "amount": ["amount", "belopp", "sum", "total"],
-        "debit": ["debit", "withdrawal", "ut", "debet"],
-        "credit": ["credit", "deposit", "in", "kredit"],
-        "currency": ["currency", "valuta"],
+        "date": ["bokföringsdag", "transaktionsdag"],
+        "description": ["beskrivning"],
+        "amount": ["belopp"],
+        "currency": ["valuta"],
+        # Optional metadata fields
+        "reference": ["referens"],
+        "balance": ["bokfört saldo"],
+        "clearing": ["clearingnummer"],
+        "account": ["kontonummer"],
+        "product": ["produkt"],
     }
     for idx, header in enumerate(normalized):
         for key, aliases in header_aliases.items():
@@ -169,36 +175,23 @@ def _header_map(headers):
 
 def _find_header(rows, limit=20):
     """
-    Scans the first `limit` rows to find the most likely header row.
-    Returns (header_row_index, mapping).
+    Scans the first `limit` rows to find the Swedbank header row.
     """
-    best_idx = 0
-    best_mapping = {}
-    best_score = 0
-
     for idx, row in enumerate(rows[:limit]):
-        # Convert row values to list of strings
         headers = [str(cell) for cell in row if cell is not None]
         mapping = _header_map(headers)
         
-        # specific score: how many critical fields found
-        score = len(mapping)
+        # Strict check for critical Swedbank fields
+        has_critical = "date" in mapping and "amount" in mapping and "description" in mapping
         
-        # We need at least Date and Amount usually, or Descripton and Amount
-        has_critical = ("date" in mapping and "amount" in mapping) or \
-                       ("date" in mapping and "debit" in mapping) or \
-                       ("description" in mapping and "amount" in mapping)
+        if has_critical:
+            LOGGER = logging.getLogger("finance_proxy")
+            LOGGER.info(f"Swedbank header found at row {idx}: {row}")
+            return idx, mapping
 
-        if score > best_score and has_critical:
-            best_score = score
-            best_mapping = mapping
-            best_idx = idx
-
-    if best_score > 0:
-        return best_idx, best_mapping
-    
-    # Fallback to first row if nothing found
-    return 0, _header_map(rows[0] if rows else [])
+    LOGGER = logging.getLogger("finance_proxy")
+    LOGGER.warning("No valid Swedbank header row found.")
+    return 0, {}
 
 
 def _parse_csv(data):
@@ -213,10 +206,29 @@ def _parse_csv(data):
         text = data.decode("utf-8", errors="ignore")
 
     sniffer = csv.Sniffer()
+    dialect = None
     try:
-        dialect = sniffer.sniff(text.splitlines()[0])
+        # Give sniffer a hint to prefer common delimiters
+        dialect = sniffer.sniff(text.splitlines()[0], delimiters=[",", ";", "\t"])
     except Exception:
-        dialect = csv.excel
+        pass
+    
+    # Fallback manual detection if sniffer fails
+    if not dialect:
+        first_line = text.splitlines()[0]
+        if "," in first_line:
+            dialect = csv.excel
+        elif ";" in first_line:
+            class SemiColonDialect(csv.Dialect):
+                delimiter = ';'
+                quotechar = '"'
+                doublequote = True
+                skipinitialspace = False
+                lineterminator = '\r\n'
+                quoting = csv.QUOTE_MINIMAL
+            dialect = SemiColonDialect
+        else:
+            dialect = csv.excel
 
     reader = csv.reader(io.StringIO(text), dialect)
     rows = [row for row in reader if any(cell.strip() for cell in row)]
@@ -397,12 +409,17 @@ def suggest_category(description, amount, project_id, location):
 
 def parse_statement(data, filename, content_type, project_id, location):
     file_type = _detect_type(filename, content_type)
-    if file_type == "xlsx":
-        raw_transactions, metadata = _parse_xlsx(data)
-    elif file_type == "pdf":
-        raw_transactions, metadata = _parse_pdf(data)
-    else:
-        raw_transactions, metadata = _parse_csv(data)
+    LOGGER = logging.getLogger("finance_proxy")
+    LOGGER.info(f"Parsing file: {filename} ({content_type}), type detected: {file_type}")
+    
+    if file_type != "csv":
+        raise ValueError("Only CSV files are supported for now (Swedbank format)")
+        
+    raw_transactions, metadata = _parse_csv(data)
+
+    LOGGER.info(f"Raw transactions extracted: {len(raw_transactions)}")
+    if raw_transactions:
+        LOGGER.info(f"Sample raw row: {raw_transactions[0]}")
 
     file_hash = hashlib.sha256(data).hexdigest()
     batch_id = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{file_hash[:8]}"
@@ -413,11 +430,20 @@ def parse_statement(data, filename, content_type, project_id, location):
         date_value = _normalize_date(row.get("date"))
         amount_value = _normalize_amount(row.get("amount"))
         description = _normalize_text(row.get("description")) or "Unknown"
-        if not date_value or amount_value is None:
+        
+        if not date_value:
+            LOGGER.warning(f"Dropping row due to invalid date: {row.get('date')} -> {date_value}")
             continue
+        if amount_value is None:
+            LOGGER.warning(f"Dropping row due to invalid amount: {row.get('amount')} -> {amount_value}")
+            continue
+            
         merchant_raw = description
         merchant_normalized = _normalize_merchant(description)
-        category = suggest_category(description, amount_value, project_id, location)
+        # category = suggest_category(description, amount_value, project_id, location)
+        # Optimization: use heuristic first to avoid API spam during debugging
+        category = _suggest_category_heuristic(description, amount_value)
+        
         normalized.append(
             {
                 "date": date_value,
@@ -431,6 +457,8 @@ def parse_statement(data, filename, content_type, project_id, location):
                 "source_row": row.get("source_row"),
             }
         )
+    
+    LOGGER.info(f"Normalized transactions: {len(normalized)}")
 
     return {
         "batch_id": batch_id,

@@ -161,6 +161,18 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def log_requests(request, call_next):
+    LOGGER.info(f"Request: {request.method} {request.url}")
+    try:
+        response = await call_next(request)
+        LOGGER.info(f"Response: {response.status_code}")
+        return response
+    except Exception as e:
+        LOGGER.error(f"Request failed: {e}")
+        raise
+
+
 @app.get("/health")
 def health():
     status = "ok" if REMOTE_AGENT and not INIT_ERROR else "degraded"

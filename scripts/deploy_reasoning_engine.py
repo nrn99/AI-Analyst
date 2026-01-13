@@ -9,7 +9,7 @@ if str(ROOT) not in sys.path:
 import vertexai
 from dotenv import load_dotenv
 from vertexai.preview import reasoning_engines
-from backend.processors.agent import FinanceAnalystAgent
+from finance_proxy.core.agent import FinanceAnalystAgent
 from env_utils import resolve_gcp_project_id
 
 def main():
@@ -54,12 +54,9 @@ def main():
 
     remote_agent = reasoning_engines.ReasoningEngine.create(
         agent_instance,
-        display_name="Finance_Agent_v3",
+        display_name="Finance_Agent_v4",
         requirements=[
             "google-cloud-aiplatform[agent_engines]",
-            "langchain-google-genai",
-            "langchain-classic",
-            "langchain-core",
             "google-api-python-client",
             "google-auth-httplib2",
             "google-auth-oauthlib",
@@ -67,9 +64,7 @@ def main():
         ],
         extra_packages=[
             "env_utils.py",
-            "backend",
-            "finance-proxy/ledger.py",
-            "finance-proxy/categories.py",
+            "finance_proxy",  # Include the whole package
         ]
     )
 

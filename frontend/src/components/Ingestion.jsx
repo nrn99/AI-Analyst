@@ -91,13 +91,13 @@ export default function Ingestion() {
                 >
                     <UploadCloud size={48} color="var(--accent-primary)" style={{ marginBottom: "1rem" }} />
                     <h3>Drag & Drop or Click to Upload</h3>
-                    <p style={{ fontSize: "0.9rem" }}>Supports CSV, Excel, PDF</p>
+                    <p style={{ fontSize: "0.9rem" }}>Supports CSV Only (Swedbank Format)</p>
                     <input
                         type="file"
                         ref={fileInputRef}
                         onChange={handleFileChange}
                         style={{ display: "none" }}
-                        accept=".csv,.xlsx,.pdf"
+                        accept=".csv"
                     />
                 </div>
                 {error && <p style={{ color: "var(--status-fragile)", marginTop: "1rem" }}>{error}</p>}
