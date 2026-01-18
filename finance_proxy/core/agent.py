@@ -11,6 +11,19 @@ from vertexai.preview.generative_models import (
 )
 from .ledger import SheetsLedgerStore
 from .categories import FIXED_CATEGORIES
+from pydantic import BaseModel, Field
+from typing import Optional
+
+class Transaction(BaseModel):
+    row_id: int = Field(..., description="The physical row number in the spreadsheet (Grounding).")
+    date: str = Field(..., description="Transaction date YYYY-MM-DD.")
+    description: str = Field(..., description="Details of the transaction.")
+    amount: float = Field(..., description="Amount in SEK.")
+    category: str = Field(..., description="Expense category.")
+    machine_pillar: Optional[str] = Field(None, description="The Financial Machine Pillar.")
+    integrity_filter: Optional[str] = Field(None, description="Integrity check status.")
+    root_trigger: Optional[str] = Field(None, description="Root emotional trigger.")
+    notes: Optional[str] = Field(None, description="User notes.")
 
 class FinanceAnalystAgent:
     def __init__(self, model_name: str = "gemini-2.0-flash-001", project: str = None, location: str = "europe-west1"):
@@ -58,22 +71,41 @@ class FinanceAnalystAgent:
             function_declarations=[list_transactions_func, get_uncategorized_func]
         )
         
+        # Core System Prompt - The Financial Machine
+        system_prompt = f"""You are The Financial Machine (TFM).
+Your Core Directive: Protect the user's cash flow, align spending with faith, and ensure reliable growth.
+You are COLD on data but WARM on mission.
+You value RADICAL TRUTH over comfort.
+
+# The 4 Pillars of Execution:
+1. Stewardship (Faith): Tithe/Charity must happen first.
+2. Reality (Needs): Survival costs (Housing/Food) <= 40% of income.
+3. Integrity (Wants): Monitor Impulse buys.
+4. Strategy (Growth): Protect the base (Savings).
+
+# GROUNDING RULE (CRITICAL):
+You must NEVER hallucinate or guess.
+Every fact you state about a transaction MUST be grounded in the ledger.
+You MUST cite the physical 'Row ID' for every specific transaction you reference.
+Example: "You spent 500 SEK on Groceries (Row 14)."
+
+The available categories are: {', '.join(FIXED_CATEGORIES)}.
+"""
+        
         self._model = GenerativeModel(
             self.model_name,
             tools=[self.finance_tool],
-            system_instruction=f"You are a helpful financial analyst. You have access to a ledger of transactions. The available categories are: {', '.join(FIXED_CATEGORIES)}."
+            system_instruction=system_prompt
         )
         self._chat = self._model.start_chat()
 
     def list_transactions(self, n: int = 5) -> str:
-        """Get the last n transactions from the ledger.
-        
-        Args:
-            n: Number of transactions to return.
-        """
+        """Get the last n transactions from the ledger."""
         data = self.ledger.list_transactions()
         txs = data.get("transactions", [])
-        return json.dumps(txs[-n:], default=str)
+        # Pydantic validation (ensure data integrity)
+        validated = [Transaction(**t).model_dump() for t in txs[-n:]]
+        return json.dumps(validated, default=str)
 
     def get_uncategorized(self) -> str:
         """Get all transactions that are uncategorized."""
@@ -81,7 +113,8 @@ class FinanceAnalystAgent:
         txs = [t for t in data.get("transactions", []) if t.get("category") == "Uncategorized"]
         return json.dumps(txs, default=str)
 
-    def query(self, input: str) -> str:
+    def query(self, prompt: str = None, input: str = None, **kwargs) -> str:
+        prompt = prompt or input or kwargs.get("question") or "So, what's up?"
         """Query the agent with a natural language question."""
         if not self._model:
             self.set_up()
@@ -90,7 +123,7 @@ class FinanceAnalystAgent:
         # We will use the automatic function calling feature of chat.send_message if available
         # OR manually loop. Safer to manual loop for now to be robust.
         
-        response = self._chat.send_message(input)
+        response = self._chat.send_message(prompt)
         
         # Detailed loop handling
         params = {}

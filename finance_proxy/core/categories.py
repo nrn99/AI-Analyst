@@ -15,6 +15,13 @@ FIXED_CATEGORIES = [
     "Taxes",
     "Fees",
     "Transfers",
+    "Overföring",
+    "Tithe",
+    "Charity",
     "Savings/Investments",
     UNCATEGORIZED,
 ]
+
+MACHINE_PILLARS = ["Needs", "Wants", "Faith", "Growth", "Internal"]
+INTEGRITY_FILTERS = ["Planned", "Impulse", "Silent Test Fail"]
+ROOT_TRIGGERS = ["Stress", "Ego", "Social", "Stewardship"]

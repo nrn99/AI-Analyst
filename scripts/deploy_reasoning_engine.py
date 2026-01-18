@@ -60,7 +60,8 @@ def main():
             "google-api-python-client",
             "google-auth-httplib2",
             "google-auth-oauthlib",
-            "python-dotenv"
+            "python-dotenv",
+            "pydantic"
         ],
         extra_packages=[
             "env_utils.py",

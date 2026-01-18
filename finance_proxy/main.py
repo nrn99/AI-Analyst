@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 import vertexai
 from vertexai.preview import reasoning_engines
 
-from core.categories import FIXED_CATEGORIES, UNCATEGORIZED
+from core.categories import FIXED_CATEGORIES, MACHINE_PILLARS, INTEGRITY_FILTERS, ROOT_TRIGGERS, UNCATEGORIZED
 from core.ingest import parse_statement
 from core.ledger import SheetsLedgerStore
 
@@ -87,6 +87,10 @@ class TransactionApproval(BaseModel):
     amount: float
     category_approved: str | None = None
     category_suggested: str | None = None
+    machine_pillar: str | None = None
+    integrity_filter: str | None = None
+    root_trigger: str | None = None
+    notes: str | None = None
 
 
 class CommitRequest(BaseModel):
@@ -190,7 +194,7 @@ async def chat(payload: ChatRequest):
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     try:
-        result = REMOTE_AGENT.query(input=message)
+        result = REMOTE_AGENT.query(prompt=message)
     except Exception as exc:
         LOGGER.exception("Reasoning engine query failed: %s", exc)
         raise HTTPException(status_code=500, detail="Reasoning engine query failed")
@@ -199,8 +203,13 @@ async def chat(payload: ChatRequest):
 
 
 @app.get("/categories")
-def list_categories():
-    return {"categories": FIXED_CATEGORIES}
+async def get_categories():
+    return {
+        "categories": FIXED_CATEGORIES,
+        "machine_pillars": MACHINE_PILLARS,
+        "integrity_filters": INTEGRITY_FILTERS,
+        "root_triggers": ROOT_TRIGGERS,
+    }
 
 
 @app.get("/audit/summary")
@@ -335,6 +344,10 @@ async def ingest_commit(payload: CommitRequest):
                 "description": item.description,
                 "amount": item.amount,
                 "category": category,
+                "machine_pillar": item.machine_pillar,
+                "integrity_filter": item.integrity_filter,
+                "root_trigger": item.root_trigger,
+                "notes": item.notes,
             }
         )
 

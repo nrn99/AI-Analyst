@@ -28,6 +28,9 @@ _CATEGORY_HINTS = {
     "Business": ["invoice", "client", "office", "supplies"],
     "Taxes": ["tax", "skatt"],
     "Fees": ["fee", "charge", "commission"],
+    "Tithe": ["church", "tithe", "tionde", "we are one church", "hillsong", "filadelfia"],
+    "Charity": ["charity", "donation", "gift", "red cross", "unicef"],
+    "Overföring": ["överföring", "overföring", "internal transfer", "balance movement", "account transfer", "egen överföring"],
     "Transfers": ["transfer", "bank", "swish"],
     "Savings/Investments": ["investment", "savings", "fund", "stock"],
     "Income": ["salary", "payroll", "income", "refund"],
@@ -407,6 +410,21 @@ def suggest_category(description, amount, project_id, location):
     return _suggest_category_heuristic(description, amount)
 
 
+def _derive_pillar(category):
+    category = (category or "").lower().strip()
+    if category in ["overföring", "transfers"]:
+        return "Internal"
+    if category in ["rent", "housing", "utilities", "groceries", "transport", "health"]:
+        return "Needs"
+    if category in ["dining", "shopping", "subscriptions", "travel"]:
+        return "Wants"
+    if category in ["tithe", "charity"]:
+        return "Faith"
+    if category in ["savings/investments", "education", "business"]:
+        return "Growth"
+    return ""
+
+
 def parse_statement(data, filename, content_type, project_id, location):
     file_type = _detect_type(filename, content_type)
     LOGGER = logging.getLogger("finance_proxy")
@@ -443,6 +461,7 @@ def parse_statement(data, filename, content_type, project_id, location):
         # category = suggest_category(description, amount_value, project_id, location)
         # Optimization: use heuristic first to avoid API spam during debugging
         category = _suggest_category_heuristic(description, amount_value)
+        machine_pillar = _derive_pillar(category)
         
         normalized.append(
             {
@@ -453,6 +472,10 @@ def parse_statement(data, filename, content_type, project_id, location):
                 "merchant_raw": merchant_raw,
                 "merchant_normalized": merchant_normalized,
                 "category_suggested": category,
+                "machine_pillar": machine_pillar,
+                "integrity_filter": "Planned",
+                "root_trigger": "",
+                "notes": "",
                 "needs_review": category == UNCATEGORIZED,
                 "source_row": row.get("source_row"),
             }
